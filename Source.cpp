@@ -1,6 +1,7 @@
 #include <iostream>
 #include <Windows.h>
 #include <process.h>
+#include <vector>
 
 
 using namespace std;
@@ -52,6 +53,8 @@ public:
 #ifdef SYNCHRONIZE_THREADS
         EnterCriticalSection(&m_criticalSection);
 #endif
+        delete m_threadName;
+            m_threadName = new char[strlen(threadName)];
         m_threadName = threadName;
 #ifdef SYNCHRONIZE_THREADS
         LeaveCriticalSection(&m_criticalSection);
@@ -100,6 +103,8 @@ public:
     {
         m_threadInfo->SetThreadId(m_threadId);
         m_threadInfo->SetThreadName(m_threadName);
+
+        cout << "Thread " << m_threadInfo->GetThreadThreadName() << " is running" << " with Id " << m_threadInfo->GetThreadId() << "\n\n";
     }
 
 private:
@@ -116,7 +121,8 @@ class ReaderThread
 {
 public:
 
-    ReaderThread(ThreadInfo* threadInfo) : m_threadInfo(threadInfo){}
+    ReaderThread(ThreadInfo* threadInfo) : m_threadInfo(threadInfo) {}
+    ReaderThread(ThreadInfo* threadInfo, const std::vector<HANDLE> threadsToWaitOn) : m_threadInfo(threadInfo), m_threadsToWaitOn(threadsToWaitOn) {}
 
     static unsigned __stdcall StaticEntryPoint(void* pObj)
     {
@@ -128,12 +134,23 @@ public:
 
     void EntryPoint()
     {
+        if (!m_threadsToWaitOn.empty())
+        {
+            for (auto it_threadHndl = m_threadsToWaitOn.begin(); it_threadHndl != m_threadsToWaitOn.end(); ++it_threadHndl)
+            {
+                WaitForSingleObject(*it_threadHndl, INFINITE);
+                m_threadsToWaitOn.erase(it_threadHndl);
+            }
+        }
+
+
         cout << "Thread " << m_threadInfo->GetThreadThreadName() << " is running" << " with Id " << m_threadInfo->GetThreadId() << "\n\n";
     }
 
 private:
 
     ThreadInfo* m_threadInfo;
+    std::vector<HANDLE> m_threadsToWaitOn;
 
 };
 
@@ -152,17 +169,17 @@ void main()
     uintptr_t t2Id = 0;
     HANDLE t2H = (HANDLE)_beginthreadex(0, 0, &WriterThread::StaticEntryPoint, t2, CREATE_SUSPENDED, &t2Id);
 
-    ReaderThread* t3 = new ReaderThread(threadInfo);
+    
+    ReaderThread* t3 = new ReaderThread(threadInfo, {t1H, t2H});
     uintptr_t t3Id = 0;
     HANDLE t3H = (HANDLE)_beginthreadex(0, 0, &ReaderThread::StaticEntryPoint, t3, CREATE_SUSPENDED, &t3Id);
-
+    
 
     // Let's start our suspended threads
 
     ResumeThread(t1H);
-    ResumeThread(t2H);
+    ResumeThread(t2H);    
     ResumeThread(t3H);
-
 
     // In order for the main thread not to terminate causing termination of a process before the other two threads started
     // we force it to wait upon t1 and t2
